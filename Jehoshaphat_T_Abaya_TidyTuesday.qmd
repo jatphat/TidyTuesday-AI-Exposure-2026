@@ -1,0 +1,243 @@
+---
+title: "Not All AI Exposure Is Equal"
+subtitle: "Language and image AI exposure across U.S. college majors | #TidyTuesday"
+author: "Jehoshaphat T. Abaya"
+date: today
+date-format: "long"
+format:
+  html:
+    toc: true
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+  pdf:
+    toc: true
+    number-sections: false
+execute:
+  warning: false
+  message: false
+---
+
+# Introduction
+
+Discussions about artificial intelligence and employment often treat AI exposure as a single characteristic of an occupation. Yet different AI applications overlap with different kinds of work. A field that relies heavily on language may have a different exposure profile from one involving visual or technical tasks.
+
+Using the October 20, 2026 #TidyTuesday dataset, this analysis asks two questions: **How do language-related and image-related AI exposure differ across college disciplines?** And **do individual majors within those disciplines generally follow the same pattern?** The goal is to describe variation in exposure—not to predict job losses.
+
+# Data and approach
+
+The dataset combines the U.S. Department of Education's College Scorecard field-of-study information with the AI Occupational Exposure (AIOE) measures of Felten, Raj, and Seamans (2021). College majors are linked to occupations through the NCES/BLS CIP–SOC crosswalk. The main table contains **285 majors**; a separate table contains **1,505 major–occupation mappings**. The analysis uses the major-level table because our questions concern differences among majors and broad academic disciplines.
+
+Both language-related and image-related exposure are standardized indices. A higher score indicates greater overlap between occupational abilities and the corresponding AI application; it is **not** a probability of automation. For each broad discipline, I calculate the unweighted mean of the major-level scores. I also calculate the percentage of majors for which the language score exceeds the image score, and vice versa. Disciplines with fewer than four majors are excluded from the charts to avoid emphasizing very small groups.
+
+```{r}
+#| label: prepare-data
+#| include: false
+library(tidyverse)
+
+base_url <- paste0(
+  "https://raw.githubusercontent.com/",
+  "rfordatascience/tidytuesday/main/data/2026/2026-10-20/"
+)
+
+ai_salary_majors <- readr::read_csv(
+  paste0(base_url, "ai_salary_majors.csv"),
+  show_col_types = FALSE
+)
+
+# Each row represents one college major.
+ai_exposure_comparison <- ai_salary_majors |>
+  mutate(exposure_difference = ai_exposure_language - ai_exposure_image)
+
+field_exposure <- ai_exposure_comparison |>
+  group_by(broad_field_short) |>
+  summarise(
+    majors = n(),
+    avg_language = mean(ai_exposure_language, na.rm = TRUE),
+    avg_image = mean(ai_exposure_image, na.rm = TRUE),
+    avg_difference = avg_language - avg_image,
+    .groups = "drop"
+  )
+
+field_consistency <- ai_exposure_comparison |>
+  group_by(broad_field_short) |>
+  summarise(
+    majors = n(),
+    language_higher = sum(exposure_difference > 0, na.rm = TRUE),
+    image_higher = sum(exposure_difference < 0, na.rm = TRUE),
+    equal_exposure = sum(exposure_difference == 0, na.rm = TRUE),
+    pct_language_higher = 100 * language_higher / majors,
+    pct_image_higher = 100 * image_higher / majors,
+    .groups = "drop"
+  ) |>
+  filter(majors >= 4)
+
+exposure_correlation <- cor(
+  ai_exposure_comparison$ai_exposure_language,
+  ai_exposure_comparison$ai_exposure_image,
+  use = "complete.obs"
+)
+```
+
+# 1. How does the type of AI exposure differ across disciplines?
+
+The first chart compares the two average exposure scores in the 15 disciplines with the largest absolute differences, restricting attention to disciplines with at least four majors. Connecting the two scores makes both the direction and size of the difference visible.
+
+```{r}
+#| label: fig-ai-exposure-dumbbell
+#| fig-width: 11
+#| fig-height: 8
+#| fig-align: center
+#| fig-cap: "Average standardized language and image AI exposure across 15 selected disciplines."
+
+plot_data <- field_exposure |>
+  filter(majors >= 4) |>
+  slice_max(order_by = abs(avg_difference), n = 15, with_ties = FALSE) |>
+  mutate(
+    field_label = paste0(broad_field_short, " (n=", majors, ")"),
+    field_label = forcats::fct_reorder(field_label, avg_difference)
+  )
+p1 <- ggplot(plot_data, aes(y = field_label)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.6) +
+  geom_segment(
+    aes(x = avg_image, xend = avg_language, yend = field_label),
+    color = "grey75", linewidth = 1.3
+  ) +
+  geom_point(aes(x = avg_language, color = "Language AI"), size = 3.8) +
+  geom_point(aes(x = avg_image, color = "Image AI"), size = 3.8) +
+  scale_color_manual(
+    values = c("Language AI" = "#2166AC", "Image AI" = "#D6604D"),
+    breaks = c("Language AI", "Image AI")
+  ) +
+  scale_x_continuous(breaks = seq(-0.5, 2, 0.5), expand = expansion(mult = c(0.03, 0.06))) +
+  labs(
+    title = "Not All AI Exposure Is Equal",
+    subtitle = "Humanities and education lean toward language AI; selected technical fields lean toward image AI",
+    x = "Average standardized AI exposure score", y = NULL, color = NULL,
+    caption = paste0(
+      "Note: n = number of majors in each discipline. Scores measure exposure, not job replacement risk.\n",
+      "Source: #TidyTuesday (2026-10-20); Felten, Raj & Seamans (2021)."
+    )
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 20, margin = margin(b = 8)),
+    plot.subtitle = element_text(size = 11, color = "grey35", margin = margin(b = 15)),
+    axis.text.y = element_text(size = 10.5, color = "grey25"),
+    axis.text.x = element_text(color = "grey40"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "top", legend.justification = "center",
+    plot.caption = element_text(size = 9, color = "grey45", hjust = 0, margin = margin(t = 15)),
+    plot.margin = margin(22, 20, 15, 15)
+  )
+
+# Display the chart
+p1
+
+# Save a high-resolution PNG for LinkedIn
+dir.create("img", showWarnings = FALSE)
+
+ggsave(
+  filename = "img/ai_exposure_dumbbell.png",
+  plot = p1,
+  width = 11,
+  height = 8,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+### Interpretation
+
+The differences are not uniform across academic disciplines. Foreign Languages has a mean language-related exposure score of approximately **1.47**, compared with **0.31** for image-related exposure. Education also shows substantially higher language exposure. Engineering Technology moves in the opposite direction, with a language score near **0.02** and an image score near **0.82**. Engineering and Architecture show a similar direction of difference.
+
+Across all 285 majors, language and image exposure have a moderate positive correlation (approximately **r = 0.477**). The measures are related, but the contrasting discipline-level patterns show why a single overall AI exposure score can obscure meaningful differences. These comparisons describe relative scores on two indices, not the share of work that AI can automate.
+
+# 2. Do individual majors follow their discipline's pattern?
+
+A difference between two discipline averages might reflect a few unusual majors. The second chart therefore asks a different question: within each discipline, what share of majors has a higher language-related score, and what share has a higher image-related score? Each bar shows the direction of the score comparison, **not** the magnitude of exposure.
+
+```{r}
+#| label: fig-exposure-consistency
+#| fig-width: 11
+#| fig-height: 8
+#| fig-align: center
+#| fig-cap: "Share of majors with a higher score on each AI exposure index, among disciplines with at least four majors."
+
+consistency_plot <- field_consistency |>
+  mutate(
+    field_label = paste0(broad_field_short, " (n=", majors, ")"),
+    field_label = forcats::fct_reorder(field_label, pct_language_higher)
+  )
+
+p2 <- ggplot(consistency_plot, aes(y = field_label)) +
+  geom_col(aes(x = pct_language_higher, fill = "Language AI"), width = 0.7) +
+  geom_col(aes(x = -pct_image_higher, fill = "Image AI"), width = 0.7) +
+  geom_vline(xintercept = 0, color = "grey35", linewidth = 0.5) +
+  scale_fill_manual(
+    values = c("Language AI" = "#2166AC", "Image AI" = "#D6604D"),
+    breaks = c("Language AI", "Image AI")
+  ) +
+  scale_x_continuous(
+    breaks = seq(-100, 100, 25),
+    labels = function(x) paste0(abs(x), "%"),
+    limits = c(-105, 105)
+  ) +
+  labs(
+    title = "The Pattern Holds Across Individual Majors",
+    subtitle = "All Engineering majors lean toward image AI; all Business and Education majors lean toward language AI",
+    x = "Share of majors with the higher exposure score", y = NULL, fill = NULL,
+    caption = paste0(
+      "Left: image score exceeds language score. Right: language score exceeds image score.\n",
+      "Note: n = number of majors; only fields with at least four majors are shown.\n",
+      "Source: #TidyTuesday (2026-10-20); Felten, Raj & Seamans (2021)."
+    )
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 19, margin = margin(b = 8)),
+    plot.subtitle = element_text(size = 11, color = "grey35", margin = margin(b = 12)),
+    axis.text.y = element_text(size = 10),
+    panel.grid.major.y = element_blank(), panel.grid.minor = element_blank(),
+    legend.position = "top",
+    plot.caption = element_text(size = 9, hjust = 0, color = "grey45"),
+    plot.margin = margin(22, 20, 15, 15)
+  )
+
+# Display the chart
+p2
+
+# Save a high-resolution PNG for LinkedIn
+ggsave(
+  filename = "img/ai_exposure_consistency.png",
+  plot = p2,
+  width = 11,
+  height = 8,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+### Interpretation
+
+The contrast is not merely an artifact of averaging. **All 38 Engineering majors** and **all 17 Engineering Technology majors** have higher image-related than language-related exposure scores. In the opposite direction, **all 19 Business majors**, **all 12 Education majors**, and **all 8 Foreign Languages majors** have higher language-related scores. Other disciplines are less uniform: for example, **6 of 8 Computer Science majors** have higher language exposure, while **2 of 8** have higher image exposure.
+
+The chart complements the first visualization. The dumbbell chart measures *how far apart* the two average scores are; this chart measures *how widely the direction of that difference is shared* among majors in each discipline. A discipline can show a modest average difference while still having a consistent direction across its majors.
+
+# Discussion and limitations
+
+These findings illustrate why the specific AI application matters. Language-related and image-related exposure capture overlapping but different dimensions of occupational work, and their relative importance varies across fields of study. This does **not** establish that language AI will replace Business graduates or that image AI will replace Engineering graduates. Exposure can reflect opportunities for AI assistance as well as potential disruption.
+
+Several limitations matter. First, the 285 observations represent **college majors, not individual graduates**; the dataset is not a random sample of workers. Second, major-level exposure scores are derived from mappings to occupations and averages across those occupations, rather than direct measurements of graduates' AI use. Third, discipline-level means give each major equal weight, regardless of graduate counts or the number of occupations associated with it. Finally, some disciplines contain relatively few majors even after the four-major minimum, so their averages should be interpreted cautiously. The comparisons are descriptive and do not support causal claims.
+
+# Conclusion
+
+The most important finding is not that one academic discipline is simply more or less exposed to AI. Rather, **the type of AI capability changes the comparison**. Language-related exposure is consistently higher among the Business and Education majors in this dataset, while image-related exposure is consistently higher among Engineering and Engineering Technology majors. Looking at both the average score differences and the consistency across individual majors provides a more informative picture than relying on one overall exposure measure.
+
+# Data sources
+
+- [#TidyTuesday, October 20, 2026: College majors, AI exposure, and starting salaries](https://github.com/rfordatascience/tidytuesday/tree/main/data/2026/2026-10-20)
+- [Felten, Raj, and Seamans (2021), AI Occupational Exposure data](https://github.com/AIOE-Data/AIOE)
+- [U.S. Department of Education, College Scorecard](https://collegescorecard.ed.gov/data/)
+- [NCES CIP–SOC crosswalk](https://nces.ed.gov/ipeds/cipcode/resources.aspx)
